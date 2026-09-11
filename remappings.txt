@@ -1,0 +1,10 @@
+clones/=lib/clones/
+context/=lib/context/
+crucible/=lib/crucible/
+erc20/=lib/erc20/
+forge-std/=lib/forge-std/src/
+ierc20/=lib/ierc20/
+ipaymentqueue/=lib/ipaymentqueue/
+iproto/=lib/iproto/
+proto/=lib/proto/src/
+reentrancy/=lib/reentrancy/
