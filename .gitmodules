@@ -28,3 +28,6 @@
 [submodule "lib/reentrancy"]
 	path = lib/reentrancy
 	url = https://github.com/uniteum/reentrancy
+[submodule "lib/ilookup"]
+	path = lib/ilookup
+	url = https://github.com/uniteum/ilookup

@@ -48,13 +48,19 @@ factory: it has no owner, no token and no float, and pays nothing. Each queue is
 it, made by whoever wants one:
 
 ```solidity
-IPaymentQueue queue = prototype.make(token, 0);   // the caller owns it, for good
+IPaymentQueue queue = prototype.make(address(token), 0);   // the caller owns it, for good
 ```
 
 A queue's address is derived from its owner and token, so `made(owner, token, variant)` names it
 before it exists, and making it again returns the same queue. Owner and token are set once, by
 `zzInit`, which only the prototype can call. `variant` is a vanity-mining input; pass 0 for the
 canonical address.
+
+The token may also be given as an [`IAddressLookup`](https://github.com/uniteum/ilookup): a contract
+whose `value()` is the token's address on the current chain. The queue's address is derived from the
+lookup, and the queue pays in whatever the lookup resolves to, so one queue keyed by a lookup has the
+same address on every chain while paying in each chain's own token. A lookup that resolves to
+`address(0)`, or any address with no code, is refused with `UnmappedLookup`.
 
 Two protections are worth knowing about, because both are easy to leave out:
 
@@ -79,7 +85,7 @@ To call a queue you only need the interface, [ipaymentqueue](https://github.com/
 ```solidity
 import {IPaymentQueue} from "ipaymentqueue/IPaymentQueue.sol";
 
-IPaymentQueue queue = prototype.make(token, 0);
+IPaymentQueue queue = prototype.make(address(token), 0);
 
 // Fund it: any transfer of the token to the queue's address will do.
 token.transfer(address(queue), 1_000e6);
@@ -97,11 +103,11 @@ queue.processPayments(10);
 forge test
 ```
 
-42 tests: the queue's behaviour against a well-behaved token, refusals by revert and by `false`
+45 tests: the queue's behaviour against a well-behaved token, refusals by revert and by `false`
 return, a recipient that re-enters the sweep, a gas-starved sweep scanned across gas limits, how
-queues are made, the four cases carried over from the v1 contract this replaces, a fuzz test that one
-id pays at most once, and seven invariants over random sequences of payments, funding, sweeps and
-withdrawals.
+queues are made, directly and from a lookup, the four cases carried over from the v1 contract this
+replaces, a fuzz test that one id pays at most once, and seven invariants over random sequences of
+payments, funding, sweeps and withdrawals.
 
 Invariant depth follows the profile: `FOUNDRY_PROFILE=quick` while iterating, `deep` before a
 deployment.
@@ -114,8 +120,12 @@ same contract to a new chain in one command. The prototype is predicted by
 every chain that has Nick's deterministic deployer:
 
 ```
-0x78375585DccD757174E162dAc1781aa422eCb139
+0xd043b5804E417f146CA886D7b9eA20F0e85A1e02
 ```
+
+The earlier prototype, which took only a token and not a lookup, is deployed at
+`0x78375585DccD757174E162dAc1781aa422eCb139`; its recipe stays under `io/PaymentQueue/` so it can
+still be verified.
 
 ```bash
 bash io/PaymentQueue/PaymentQueue.sh                              # predict (offline)
@@ -132,6 +142,7 @@ directories, so a consuming repo deploys its own queue without vendoring this on
 ## Dependencies
 
 - [ipaymentqueue](https://github.com/uniteum/ipaymentqueue) — the interface
+- [ilookup](https://github.com/uniteum/ilookup) — the lookup interface a token may be given as
 - [proto](https://github.com/uniteum/proto) and [iproto](https://github.com/uniteum/iproto) — the
   Bitsy prototype base
 - [clones](https://github.com/uniteum/clones) — EIP-1167 minimal proxies

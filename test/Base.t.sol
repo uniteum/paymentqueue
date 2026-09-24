@@ -42,7 +42,7 @@ abstract contract BaseTest is Test {
      * @notice The owner's queue for `token_`.
      */
     function deploy(IERC20 token_) internal returns (IPaymentQueue queue) {
-        queue = owner.make(proto, token_, 0);
+        queue = owner.make(proto, address(token_), 0);
     }
 
     function assertStatus(IPaymentQueue queue, uint256 id, IPaymentQueue.Status want, string memory why) internal view {

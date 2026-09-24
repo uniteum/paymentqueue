@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.34;
 
+import {IAddressLookup} from "ilookup/IAddressLookup.sol";
 import {IERC20} from "ierc20/IERC20.sol";
 import {IPaymentQueue} from "ipaymentqueue/IPaymentQueue.sol";
 import {IPrototype} from "iproto/IPrototype.sol";
@@ -15,8 +16,9 @@ import {SafeERC20} from "erc20/SafeERC20.sol";
  * response or a retry, never pays twice.
  * @dev A Bitsy prototype (https://uniteum.one/bitsy/): the deployed contract is an inert factory with
  * no owner, and each queue is an EIP-1167 clone of it at a CREATE2 address derived from its owner and
- * token, so {made} can name a queue before it exists. A queue's owner and token are set once, by
- * {zzInit}, and never change.
+ * token, so {made} can name a queue before it exists. The token may be given as an {IAddressLookup},
+ * in which case the address is derived from the lookup and the queue pays in whatever it resolves to
+ * on this chain. A queue's owner and token are set once, by {zzInit}, and never change.
  *
  * The line is a mapping walked by a head and a tail index. A settled entry is deleted as the head
  * passes it, so nothing is rescanned. Status is written before each transfer, and both entry points
@@ -104,7 +106,7 @@ contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
     /**
      * @inheritdoc IPaymentQueue
      */
-    function made(address owner_, IERC20 token_, uint256 variant)
+    function made(address owner_, address token_, uint256 variant)
         external
         view
         returns (bool exists, address home, bytes32 salt)
@@ -115,24 +117,44 @@ contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
     /**
      * @inheritdoc IPaymentQueue
      */
-    function make(IERC20 token_, uint256 variant) external returns (IPaymentQueue queue) {
+    function make(address token_, uint256 variant) external returns (IPaymentQueue queue) {
         (, address home,) = this.make(encode(msg.sender, token_), variant);
         queue = IPaymentQueue(home);
     }
 
     /**
      * @inheritdoc IPrototype
-     * @dev Decodes `(owner, token)` into the new queue's storage.
+     * @dev Decodes `(owner, token)` into the new queue's storage, resolving the token through its
+     * lookup when it was given as one.
      */
     function zzInit(bytes calldata args, uint256) external override onlyProto {
-        (owner, token) = abi.decode(args, (address, IERC20));
+        (address owner_, address token_) = abi.decode(args, (address, address));
+        owner = owner_;
+        token = _resolve(token_);
     }
 
     /**
      * @inheritdoc IPaymentQueue
      */
-    function encode(address owner_, IERC20 token_) public pure returns (bytes memory args) {
+    function encode(address owner_, address token_) public pure returns (bytes memory args) {
         args = abi.encode(owner_, token_);
+    }
+
+    /**
+     * @dev The token behind `token_`. An {IAddressLookup} resolves to its `value()`; any other
+     * deployed address is the token itself. Reverts with {UnmappedLookup} when `token_` has no code,
+     * since an undeployed lookup or a stray account would otherwise be stored as the token, and when
+     * a lookup resolves to `address(0)`, which is how a lookup says its token has not reached this
+     * chain.
+     */
+    function _resolve(address token_) private view returns (IERC20) {
+        if (token_.code.length == 0) revert UnmappedLookup(token_);
+        try IAddressLookup(token_).value() returns (address resolved) {
+            if (resolved == address(0)) revert UnmappedLookup(token_);
+            return IERC20(resolved);
+        } catch {
+            return IERC20(token_);
+        }
     }
 
     /**

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.34;
 
-import {IERC20} from "ierc20/IERC20.sol";
 import {IPaymentQueue} from "ipaymentqueue/IPaymentQueue.sol";
 import {Test, console} from "forge-std/Test.sol";
 
@@ -17,10 +16,10 @@ contract PaymentQueueUser is Test {
     }
 
     /**
-     * @notice Make this account's queue for `token`, checking that {IPaymentQueue.made} predicted the
-     * address {IPaymentQueue.make} returned.
+     * @notice Make this account's queue for `token`, a token or a lookup, checking that
+     * {IPaymentQueue.made} predicted the address {IPaymentQueue.make} returned.
      */
-    function make(IPaymentQueue factory, IERC20 token, uint256 variant) public returns (IPaymentQueue queue) {
+    function make(IPaymentQueue factory, address token, uint256 variant) public returns (IPaymentQueue queue) {
         (, address predicted,) = factory.made(address(this), token, variant);
         queue = factory.make(token, variant);
         assertEq(address(queue), predicted, "make != made");

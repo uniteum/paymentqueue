@@ -4,6 +4,7 @@ crucible/=lib/crucible/
 erc20/=lib/erc20/
 forge-std/=lib/forge-std/src/
 ierc20/=lib/ierc20/
+ilookup/=lib/ilookup/
 ipaymentqueue/=lib/ipaymentqueue/
 iproto/=lib/iproto/
 proto/=lib/proto/src/
