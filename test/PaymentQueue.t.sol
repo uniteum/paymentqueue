@@ -361,6 +361,43 @@ contract PaymentQueueTest is BaseTest {
     }
 
     /**
+     * @notice {blockOf} follows each status change: 0 while `Unknown`, then the block that queued the
+     * payment, then the block that paid it. A repeat {pay} changes nothing, so it moves nothing.
+     */
+    function test_BlockOf_FollowsStatus() public {
+        assertEq(queue.blockOf(1), 0, "unknown");
+
+        vm.roll(100);
+        owner.pay(queue, 1, alice, 10 * USDC);
+        assertEq(queue.blockOf(1), 100, "queued");
+
+        vm.roll(200);
+        token.mint(address(queue), 10 * USDC);
+        stranger.processPayments(queue, 10);
+        assertEq(queue.blockOf(1), 200, "paid");
+
+        vm.roll(300);
+        owner.pay(queue, 1, alice, 10 * USDC);
+        assertEq(queue.blockOf(1), 200, "repeat is a no-op");
+    }
+
+    /**
+     * @notice A refusal records the block too, so a `Failed` id is found the same way.
+     */
+    function test_BlockOf_RecordsRefusal() public {
+        BlacklistToken blk = new BlacklistToken();
+        IPaymentQueue q = deploy(blk);
+        blk.blacklist(carol);
+        blk.mint(address(q), 10 * USDC);
+
+        vm.roll(100);
+        owner.pay(q, 1, carol, 10 * USDC);
+
+        assertStatus(q, 1, IPaymentQueue.Status.Failed, "failed");
+        assertEq(q.blockOf(1), 100, "failed in block 100");
+    }
+
+    /**
      * @notice The owner can recover float. v1 had no way to.
      */
     function test_Withdraw_OwnerRecoversFloat() public {

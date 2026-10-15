@@ -77,6 +77,7 @@ contract PaymentQueueInvariantTest is BaseTest {
         for (uint256 i = 0; i < handler.submittedCount(); i++) {
             IPaymentQueue.Status status = queue.statusOf(handler.submitted(i));
             assertTrue(status != IPaymentQueue.Status.Unknown, "submitted id has no status");
+            assertGt(queue.blockOf(handler.submitted(i)), 0, "submitted id has no block");
             if (status == IPaymentQueue.Status.Queued) waiting++;
         }
         assertEq(queue.queued(), waiting, "queued() disagrees with statuses");
@@ -89,6 +90,7 @@ contract PaymentQueueInvariantTest is BaseTest {
         for (uint256 id = 0; id < handler.IDS(); id++) {
             if (!handler.known(id)) {
                 assertTrue(queue.statusOf(id) == IPaymentQueue.Status.Unknown, "unsubmitted id has a status");
+                assertEq(queue.blockOf(id), 0, "unsubmitted id has a block");
             }
         }
     }

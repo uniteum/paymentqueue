@@ -30,7 +30,9 @@ need spend gas on a sweep that would do nothing.
 it, and its amount stays in the float. A `Failed` id is spent: submitting it again does nothing.
 
 **Status.** `statusOf(id)` is `Unknown`, `Queued`, `Paid` or `Failed`, and `queued()` counts what is
-waiting. `pay` returns the id's status, so simulating it previews the outcome.
+waiting. `pay` returns the id's status, so simulating it previews the outcome. `blockOf(id)` is the
+block that set the status, so the transaction behind it is one single-block log query away, however
+old it is.
 
 **Float.** Anyone can send the token to a queue. `withdraw(to, amount)` takes it back out, owner
 only. Native currency is refused rather than stranded.
@@ -103,7 +105,7 @@ queue.processPayments(10);
 forge test
 ```
 
-45 tests: the queue's behaviour against a well-behaved token, refusals by revert and by `false`
+47 tests: the queue's behaviour against a well-behaved token, refusals by revert and by `false`
 return, a recipient that re-enters the sweep, a gas-starved sweep scanned across gas limits, how
 queues are made, directly and from a lookup, the four cases carried over from the v1 contract this
 replaces, a fuzz test that one id pays at most once, and seven invariants over random sequences of

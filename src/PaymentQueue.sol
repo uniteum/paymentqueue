@@ -36,6 +36,14 @@ contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
     }
 
     /**
+     * @dev An id's status and the block it was set in, packed into one storage slot.
+     */
+    struct Record {
+        Status status;
+        uint64 blockNumber;
+    }
+
+    /**
      * @inheritdoc IPaymentQueue
      */
     address public owner;
@@ -45,14 +53,24 @@ contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
      */
     IERC20 public token;
 
-    /**
-     * @inheritdoc IPaymentQueue
-     */
-    mapping(uint256 id => Status) public statusOf;
-
+    mapping(uint256 id => Record) private _records;
     mapping(uint256 index => Entry) private _queue;
     uint256 private _head;
     uint256 private _tail;
+
+    /**
+     * @inheritdoc IPaymentQueue
+     */
+    function statusOf(uint256 id) external view returns (Status) {
+        return _records[id].status;
+    }
+
+    /**
+     * @inheritdoc IPaymentQueue
+     */
+    function blockOf(uint256 id) external view returns (uint256) {
+        return _records[id].blockNumber;
+    }
 
     /**
      * @inheritdoc IPaymentQueue
@@ -66,13 +84,13 @@ contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
      */
     function pay(uint256 id, address recipient, uint256 amount) external nonReentrant returns (Status status) {
         if (msg.sender != owner) revert Unauthorized();
-        status = statusOf[id];
+        status = _records[id].status;
         if (status != Status.Unknown) return status;
         if (_head == _tail && amount <= token.balanceOf(address(this))) {
             status = _settle(id, recipient, amount);
         } else {
             status = Status.Queued;
-            statusOf[id] = status;
+            _record(id, status);
             _queue[_tail++] = Entry({id: id, recipient: recipient, amount: amount});
             emit PaymentQueued(id, recipient, amount);
         }
@@ -169,15 +187,22 @@ contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
      * reverts.
      */
     function _settle(uint256 id, address recipient, uint256 amount) private returns (Status) {
-        statusOf[id] = Status.Paid;
+        _record(id, Status.Paid);
         uint256 gasBefore = gasleft();
         if (token.trySafeTransfer(recipient, amount)) {
             emit PaymentPaid(id, recipient, amount);
             return Status.Paid;
         }
         if (gasleft() < gasBefore / 64) revert TransferOutOfGas(id);
-        statusOf[id] = Status.Failed;
+        _record(id, Status.Failed);
         emit PaymentFailed(id, recipient, amount);
         return Status.Failed;
+    }
+
+    /**
+     * @dev Set `id`'s status, and the block it was set in, for {blockOf}.
+     */
+    function _record(uint256 id, Status status) private {
+        _records[id] = Record({status: status, blockNumber: uint64(block.number)});
     }
 }
