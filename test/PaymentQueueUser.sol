@@ -26,12 +26,24 @@ contract PaymentQueueUser is Test {
         console.log("%s make queue %s", name, address(queue));
     }
 
+    /**
+     * @notice Pay with no fee, which is how most tests pay: the queue's behaviour is the same as it was
+     * before fees existed.
+     */
     function pay(IPaymentQueue queue, uint256 id, address recipient, uint256 amount)
         public
         returns (IPaymentQueue.Status status)
     {
-        console.log("%s pay %s to %s", name, amount, recipient);
-        status = queue.pay(id, recipient, amount);
+        status = pay(queue, id, recipient, amount, 0);
+    }
+
+    function pay(IPaymentQueue queue, uint256 id, address recipient, uint256 amount, uint256 feeBasisPoints)
+        public
+        returns (IPaymentQueue.Status status)
+    {
+        console.log("%s pay %s to %s, fee in basis points:", name, amount, recipient);
+        console.log("  %s", feeBasisPoints);
+        status = queue.pay(id, recipient, amount, feeBasisPoints);
     }
 
     function processPayments(IPaymentQueue queue, uint256 limit) public returns (uint256 settled) {
@@ -48,9 +60,14 @@ contract PaymentQueueUser is Test {
         console.log("%s processPayments with %s gas: %s", name, gas, ok);
     }
 
-    function withdraw(IPaymentQueue queue, address to, uint256 amount) public {
-        console.log("%s withdraw %s to %s", name, amount, to);
-        queue.withdraw(to, amount);
+    function withdrawFunds(IPaymentQueue queue, address to, uint256 amount) public {
+        console.log("%s withdrawFunds %s to %s", name, amount, to);
+        queue.withdrawFunds(to, amount);
+    }
+
+    function withdrawFees(IPaymentQueue queue, address to, uint256 amount) public {
+        console.log("%s withdrawFees %s to %s", name, amount, to);
+        queue.withdrawFees(to, amount);
     }
 
     /**

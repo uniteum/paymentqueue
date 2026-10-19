@@ -33,10 +33,16 @@ contract PaymentQueueHandler is Test {
     uint256[] public submitted;
     mapping(uint256 id => bool) public known;
     mapping(uint256 id => uint256) public amountOf;
+    mapping(uint256 id => uint256) public feeOf;
     uint256 public funded;
 
     /**
-     * @notice Set if a sweep ever stopped short of its limit while the float covered the next payment.
+     * @notice Fees the owner has withdrawn so far.
+     */
+    uint256 public collected;
+
+    /**
+     * @notice Set if a sweep ever stopped short of its limit while the funds covered the next payment.
      */
     bool public stalled;
 
@@ -54,17 +60,19 @@ contract PaymentQueueHandler is Test {
         }
     }
 
-    function pay(uint256 idSeed, uint256 amount, uint256 decoySeed) external {
+    function pay(uint256 idSeed, uint256 amount, uint256 feeBasisPoints, uint256 decoySeed) external {
         uint256 id = idSeed % IDS;
         amount = bound(amount, 1, 30 * USDC);
+        feeBasisPoints = bound(feeBasisPoints, 0, 10_000);
         if (known[id]) {
-            owner.pay(queue, id, decoyOf(decoySeed), amount);
+            owner.pay(queue, id, decoyOf(decoySeed), amount, feeBasisPoints);
             return;
         }
         known[id] = true;
         amountOf[id] = amount;
+        feeOf[id] = amount * feeBasisPoints / 10_000;
         submitted.push(id);
-        owner.pay(queue, id, recipientOf(id), amount);
+        owner.pay(queue, id, recipientOf(id), amount, feeBasisPoints);
     }
 
     function fund(uint256 amount) external {
@@ -76,14 +84,20 @@ contract PaymentQueueHandler is Test {
     function sweep(uint256 limit) external {
         limit = bound(limit, 0, 5);
         uint256 settled = sweeper.processPayments(queue, limit);
-        if (settled < limit && queue.queued() > 0 && amountOf[firstQueued()] <= token.balanceOf(address(queue))) {
+        if (settled < limit && queue.queued() > 0 && amountOf[firstQueued()] <= queue.funds()) {
             stalled = true;
         }
     }
 
-    function withdraw(uint256 amount) external {
-        amount = bound(amount, 0, token.balanceOf(address(queue)));
-        owner.withdraw(queue, sink, amount);
+    function withdrawFunds(uint256 amount) external {
+        amount = bound(amount, 0, queue.funds());
+        owner.withdrawFunds(queue, sink, amount);
+    }
+
+    function collect(uint256 amount) external {
+        amount = bound(amount, 0, queue.fees());
+        owner.withdrawFees(queue, sink, amount);
+        collected += amount;
     }
 
     function submittedCount() external view returns (uint256) {

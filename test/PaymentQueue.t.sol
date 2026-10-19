@@ -23,28 +23,28 @@ contract PaymentQueueTest is BaseTest {
     }
 
     /**
-     * @notice With nothing waiting and float to cover it, {pay} transfers at once.
+     * @notice With nothing waiting and funds to cover it, {pay} transfers at once.
      */
     function test_Pay_FundedPaysAtOnce() public {
         token.mint(address(queue), 100 * USDC);
 
         vm.expectEmit(address(queue));
-        emit IPaymentQueue.PaymentPaid(1, alice, 10 * USDC);
+        emit IPaymentQueue.PaymentPaid(1, alice, 10 * USDC, 0);
         IPaymentQueue.Status status = owner.pay(queue, 1, alice, 10 * USDC);
 
         assertStatus(status, IPaymentQueue.Status.Paid, "returned status");
         assertStatus(queue, 1, IPaymentQueue.Status.Paid, "recorded status");
         assertEq(token.balanceOf(alice), 10 * USDC, "alice paid");
-        assertEq(token.balanceOf(address(queue)), 90 * USDC, "float spent");
+        assertEq(token.balanceOf(address(queue)), 90 * USDC, "funds spent");
         assertEq(queue.queued(), 0, "nothing waiting");
     }
 
     /**
-     * @notice Without float, {pay} keeps the payment waiting. v1 dropped it.
+     * @notice Without funds, {pay} keeps the payment waiting. v1 dropped it.
      */
     function test_Pay_UnfundedQueues() public {
         vm.expectEmit(address(queue));
-        emit IPaymentQueue.PaymentQueued(1, alice, 10 * USDC);
+        emit IPaymentQueue.PaymentQueued(1, alice, 10 * USDC, 0);
         IPaymentQueue.Status status = owner.pay(queue, 1, alice, 10 * USDC);
 
         assertStatus(status, IPaymentQueue.Status.Queued, "returned status");
@@ -54,7 +54,7 @@ contract PaymentQueueTest is BaseTest {
     }
 
     /**
-     * @notice A new payment the float could cover still waits behind one it cannot.
+     * @notice A new payment the funds could cover still waits behind one it cannot.
      */
     function test_Pay_DoesNotJumpTheLine() public {
         token.mint(address(queue), 20 * USDC);
@@ -82,7 +82,7 @@ contract PaymentQueueTest is BaseTest {
     }
 
     /**
-     * @notice Repeating {pay} for a paid id pays nothing more, whatever float is left.
+     * @notice Repeating {pay} for a paid id pays nothing more, whatever funds are left.
      */
     function test_Pay_RepeatAfterPaidIsNoOp() public {
         token.mint(address(queue), 100 * USDC);
@@ -167,7 +167,7 @@ contract PaymentQueueTest is BaseTest {
         token.mint(address(queue), 10 * USDC);
 
         vm.expectEmit(address(queue));
-        emit IPaymentQueue.PaymentPaid(1, alice, 10 * USDC);
+        emit IPaymentQueue.PaymentPaid(1, alice, 10 * USDC, 0);
         uint256 settled = stranger.processPayments(queue, 10);
 
         assertEq(settled, 1, "settled count");
@@ -177,7 +177,7 @@ contract PaymentQueueTest is BaseTest {
     }
 
     /**
-     * @notice A sweep stops at the first payment the float cannot cover and leaves it, and everything
+     * @notice A sweep stops at the first payment the funds cannot cover and leaves it, and everything
      * behind it, waiting. Settling nothing, it returns 0, which is what a simulated sweep reports.
      */
     function test_Process_StopsAtUncoveredHead() public {
@@ -195,7 +195,7 @@ contract PaymentQueueTest is BaseTest {
     }
 
     /**
-     * @notice Once the float covers the head, the line pays out in the order it was joined.
+     * @notice Once the funds cover the head, the line pays out in the order it was joined.
      */
     function test_Process_PaysInOrder() public {
         owner.pay(queue, 1, alice, 30 * USDC);
@@ -205,15 +205,15 @@ contract PaymentQueueTest is BaseTest {
         token.mint(address(queue), 15 * USDC);
 
         vm.expectEmit(address(queue));
-        emit IPaymentQueue.PaymentPaid(1, alice, 30 * USDC);
+        emit IPaymentQueue.PaymentPaid(1, alice, 30 * USDC, 0);
         vm.expectEmit(address(queue));
-        emit IPaymentQueue.PaymentPaid(2, bob, 5 * USDC);
+        emit IPaymentQueue.PaymentPaid(2, bob, 5 * USDC, 0);
         uint256 settled = stranger.processPayments(queue, 10);
 
         assertEq(settled, 2, "both settled");
         assertEq(token.balanceOf(alice), 30 * USDC, "alice paid");
         assertEq(token.balanceOf(bob), 5 * USDC, "bob paid");
-        assertEq(token.balanceOf(address(queue)), 0, "float spent exactly");
+        assertEq(token.balanceOf(address(queue)), 0, "funds spent exactly");
     }
 
     /**
@@ -262,7 +262,7 @@ contract PaymentQueueTest is BaseTest {
     /**
      * @notice A transfer the token refuses, as USDC refuses a blacklisted recipient, is marked
      * `Failed` and the sweep carries on to the payment behind it, which the refused amount, still in
-     * the float, pays for. In v1 the refusal reverted every sweep from then on.
+     * the funds, pays for. In v1 the refusal reverted every sweep from then on.
      */
     function test_Refused_SweepMarksFailedAndCarriesOn() public {
         BlacklistToken blk = new BlacklistToken();
@@ -273,9 +273,9 @@ contract PaymentQueueTest is BaseTest {
         blk.mint(address(q), 10 * USDC);
 
         vm.expectEmit(address(q));
-        emit IPaymentQueue.PaymentFailed(1, carol, 10 * USDC);
+        emit IPaymentQueue.PaymentFailed(1, carol, 10 * USDC, 0);
         vm.expectEmit(address(q));
-        emit IPaymentQueue.PaymentPaid(2, alice, 10 * USDC);
+        emit IPaymentQueue.PaymentPaid(2, alice, 10 * USDC, 0);
         uint256 settled = stranger.processPayments(q, 10);
 
         assertEq(settled, 2, "both left the line");
@@ -295,12 +295,12 @@ contract PaymentQueueTest is BaseTest {
         blk.mint(address(q), 20 * USDC);
 
         vm.expectEmit(address(q));
-        emit IPaymentQueue.PaymentFailed(1, carol, 10 * USDC);
+        emit IPaymentQueue.PaymentFailed(1, carol, 10 * USDC, 0);
         IPaymentQueue.Status status = owner.pay(q, 1, carol, 10 * USDC);
 
         assertStatus(status, IPaymentQueue.Status.Failed, "returned status");
         assertStatus(q, 1, IPaymentQueue.Status.Failed, "recorded status");
-        assertEq(blk.balanceOf(address(q)), 20 * USDC, "float untouched");
+        assertEq(blk.balanceOf(address(q)), 20 * USDC, "funds untouched");
         assertEq(q.queued(), 0, "not left waiting");
     }
 
@@ -398,25 +398,25 @@ contract PaymentQueueTest is BaseTest {
     }
 
     /**
-     * @notice The owner can recover float. v1 had no way to.
+     * @notice The owner can recover funds. v1 had no way to.
      */
-    function test_Withdraw_OwnerRecoversFloat() public {
+    function test_WithdrawFunds_OwnerRecoversFunds() public {
         token.mint(address(queue), 100 * USDC);
 
-        owner.withdraw(queue, bob, 40 * USDC);
+        owner.withdrawFunds(queue, bob, 40 * USDC);
 
         assertEq(token.balanceOf(bob), 40 * USDC, "bob received");
-        assertEq(token.balanceOf(address(queue)), 60 * USDC, "float reduced");
+        assertEq(token.balanceOf(address(queue)), 60 * USDC, "funds reduced");
     }
 
     /**
-     * @notice Only the owner can withdraw float.
+     * @notice Only the owner can withdraw funds.
      */
-    function test_Withdraw_OwnerOnly() public {
+    function test_WithdrawFunds_OwnerOnly() public {
         token.mint(address(queue), 100 * USDC);
 
         vm.expectRevert(IPrototype.Unauthorized.selector);
-        stranger.withdraw(queue, address(stranger), 40 * USDC);
+        stranger.withdrawFunds(queue, address(stranger), 40 * USDC);
     }
 
     /**
@@ -454,9 +454,218 @@ contract PaymentQueueTest is BaseTest {
         assertEq(settled, 2, "settled count");
         assertEq(hook.balanceOf(address(mallory)), 10 * USDC, "mallory paid once");
         assertEq(hook.balanceOf(alice), 10 * USDC, "alice paid once");
-        assertEq(hook.balanceOf(address(q)), 10 * USDC, "the rest of the float kept");
+        assertEq(hook.balanceOf(address(q)), 10 * USDC, "the rest of the funds kept");
         assertStatus(q, 0, IPaymentQueue.Status.Unknown, "no phantom id 0");
         assertPaidInOrder(logs, address(q), 1, 2);
+    }
+
+    /**
+     * @notice A payment made with a fee pays the recipient the amount less the fee and keeps the fee,
+     * accrued apart from the funds. The funds the next payment can draw on have lost the whole amount.
+     */
+    function test_Fee_PaidDeductsAndAccrues() public {
+        token.mint(address(queue), 100 * USDC);
+
+        vm.expectEmit(address(queue));
+        emit IPaymentQueue.PaymentPaid(1, alice, 10 * USDC, 3 * USDC / 10);
+        IPaymentQueue.Status status = owner.pay(queue, 1, alice, 10 * USDC, 300);
+
+        assertStatus(status, IPaymentQueue.Status.Paid, "returned status");
+        assertEq(token.balanceOf(alice), 97 * USDC / 10, "alice paid the amount less the fee");
+        assertEq(queue.fees(), 3 * USDC / 10, "the fee accrued");
+        assertEq(token.balanceOf(address(queue)), 903 * USDC / 10, "the queue holds the fee and the rest");
+        assertEq(queue.funds(), 90 * USDC, "the funds lost the whole amount");
+    }
+
+    /**
+     * @notice The fee rounds down, so the recipient never loses a base unit to rounding.
+     */
+    function test_Fee_RoundsDown() public {
+        token.mint(address(queue), 100 * USDC);
+
+        owner.pay(queue, 1, alice, 33, 300); // 0.99 of a base unit
+        owner.pay(queue, 2, bob, 34, 300); // 1.02
+
+        assertEq(token.balanceOf(alice), 33, "alice paid in full");
+        assertEq(token.balanceOf(bob), 33, "bob paid less one base unit");
+        assertEq(queue.fees(), 1, "one base unit accrued");
+    }
+
+    /**
+     * @notice A fee of the whole amount is allowed: the recipient is paid nothing and the whole amount
+     * accrues.
+     */
+    function test_Fee_WholeAmountIsAllowed() public {
+        token.mint(address(queue), 100 * USDC);
+
+        IPaymentQueue.Status status = owner.pay(queue, 1, alice, 10 * USDC, 10_000);
+
+        assertStatus(status, IPaymentQueue.Status.Paid, "paid");
+        assertEq(token.balanceOf(alice), 0, "alice paid nothing");
+        assertEq(queue.fees(), 10 * USDC, "the whole amount accrued");
+    }
+
+    /**
+     * @notice A fee above the whole amount is refused before anything is recorded, so the id can be
+     * submitted again.
+     */
+    function test_Fee_AboveWholeAmountReverts() public {
+        token.mint(address(queue), 100 * USDC);
+
+        vm.expectRevert(abi.encodeWithSelector(IPaymentQueue.FeeTooHigh.selector, 10_001));
+        owner.pay(queue, 1, alice, 10 * USDC, 10_001);
+
+        assertStatus(queue, 1, IPaymentQueue.Status.Unknown, "nothing recorded");
+    }
+
+    /**
+     * @notice A payment that waits carries its fee with it: nothing accrues until it is paid, and the
+     * sweep that pays it deducts the fee fixed when it joined the line.
+     */
+    function test_Fee_QueuedCarriesItsFee() public {
+        vm.expectEmit(address(queue));
+        emit IPaymentQueue.PaymentQueued(1, alice, 10 * USDC, 3 * USDC / 10);
+        owner.pay(queue, 1, alice, 10 * USDC, 300);
+        assertEq(queue.fees(), 0, "nothing accrued while waiting");
+
+        token.mint(address(queue), 10 * USDC);
+        vm.expectEmit(address(queue));
+        emit IPaymentQueue.PaymentPaid(1, alice, 10 * USDC, 3 * USDC / 10);
+        stranger.processPayments(queue, 10);
+
+        assertEq(token.balanceOf(alice), 97 * USDC / 10, "alice paid less the fee");
+        assertEq(queue.fees(), 3 * USDC / 10, "the fee accrued on payment");
+        assertEq(queue.funds(), 0, "the funds are spent");
+    }
+
+    /**
+     * @notice The first {pay} for an id fixes its fee along with its recipient and amount.
+     */
+    function test_Fee_FirstCallFixesTheFee() public {
+        owner.pay(queue, 1, alice, 10 * USDC, 300);
+        owner.pay(queue, 1, alice, 10 * USDC, 0);
+        token.mint(address(queue), 10 * USDC);
+
+        stranger.processPayments(queue, 10);
+
+        assertEq(token.balanceOf(alice), 97 * USDC / 10, "paid at the first fee");
+        assertEq(queue.fees(), 3 * USDC / 10, "the first fee accrued");
+    }
+
+    /**
+     * @notice The funds must cover the whole amount, fee included: the fee stays behind as accrued fees,
+     * so funds that cover only what the recipient gets leaves the payment waiting.
+     */
+    function test_Fee_FloatMustCoverTheWholeAmount() public {
+        token.mint(address(queue), 98 * USDC / 10);
+
+        IPaymentQueue.Status status = owner.pay(queue, 1, alice, 10 * USDC, 300);
+
+        assertStatus(status, IPaymentQueue.Status.Queued, "waits for the fee's share too");
+        assertEq(token.balanceOf(alice), 0, "alice unpaid");
+    }
+
+    /**
+     * @notice Accrued fees are not funds: they never pay anyone.
+     */
+    function test_Fee_AccruedFeesDoNotPayOut() public {
+        token.mint(address(queue), 10 * USDC);
+        owner.pay(queue, 1, alice, 10 * USDC, 300);
+        assertEq(token.balanceOf(address(queue)), 3 * USDC / 10, "only the fee is left");
+
+        IPaymentQueue.Status status = owner.pay(queue, 2, bob, 3 * USDC / 10, 0);
+
+        assertStatus(status, IPaymentQueue.Status.Queued, "the fee does not pay bob");
+        assertEq(queue.funds(), 0, "no funds");
+        assertEq(queue.fees(), 3 * USDC / 10, "fees untouched");
+    }
+
+    /**
+     * @notice A sweep draws each payment's whole amount from the funds, so the second of two payments
+     * waits until the funds cover its amount after the first's fee has been kept back.
+     */
+    function test_Fee_SweepDrawsTheWholeAmount() public {
+        owner.pay(queue, 1, alice, 10 * USDC, 300);
+        owner.pay(queue, 2, bob, 10 * USDC, 300);
+        token.mint(address(queue), 199 * USDC / 10);
+
+        assertEq(stranger.processPayments(queue, 10), 1, "only alice is covered");
+        assertEq(queue.funds(), 99 * USDC / 10, "funds after alice");
+
+        token.mint(address(queue), 1 * USDC / 10);
+        assertEq(stranger.processPayments(queue, 10), 1, "now bob is covered");
+        assertEq(token.balanceOf(bob), 97 * USDC / 10, "bob paid less the fee");
+        assertEq(queue.fees(), 6 * USDC / 10, "both fees accrued");
+        assertEq(queue.funds(), 0, "funds spent exactly");
+    }
+
+    /**
+     * @notice A refused transfer earns no fee: the whole amount stays in the funds.
+     */
+    function test_Fee_FailedEarnsNothing() public {
+        BlacklistToken blk = new BlacklistToken();
+        IPaymentQueue q = deploy(blk);
+        blk.blacklist(carol);
+        blk.mint(address(q), 20 * USDC);
+
+        vm.expectEmit(address(q));
+        emit IPaymentQueue.PaymentFailed(1, carol, 10 * USDC, 3 * USDC / 10);
+        owner.pay(q, 1, carol, 10 * USDC, 300);
+
+        assertEq(q.fees(), 0, "no fee accrued");
+        assertEq(q.funds(), 20 * USDC, "funds untouched");
+    }
+
+    /**
+     * @notice {withdrawFunds} takes from the funds only; the accrued fees are out of its reach.
+     */
+    function test_WithdrawFunds_CannotTakeAccruedFees() public {
+        token.mint(address(queue), 100 * USDC);
+        owner.pay(queue, 1, alice, 10 * USDC, 300);
+
+        vm.expectRevert(abi.encodeWithSelector(IPaymentQueue.InsufficientFunds.selector, 90 * USDC));
+        owner.withdrawFunds(queue, bob, 90 * USDC + 1);
+
+        owner.withdrawFunds(queue, bob, 90 * USDC);
+        assertEq(token.balanceOf(bob), 90 * USDC, "the whole funds withdrawn");
+        assertEq(queue.fees(), 3 * USDC / 10, "fees still accrued");
+        assertEq(token.balanceOf(address(queue)), 3 * USDC / 10, "and still held");
+    }
+
+    /**
+     * @notice The owner withdraws accrued fees separately, which leaves the funds as they were.
+     */
+    function test_WithdrawFees_OwnerCollects() public {
+        token.mint(address(queue), 100 * USDC);
+        owner.pay(queue, 1, alice, 10 * USDC, 300);
+
+        owner.withdrawFees(queue, bob, 3 * USDC / 10);
+
+        assertEq(token.balanceOf(bob), 3 * USDC / 10, "bob received the fees");
+        assertEq(queue.fees(), 0, "nothing left accrued");
+        assertEq(queue.funds(), 90 * USDC, "funds untouched");
+    }
+
+    /**
+     * @notice Fees cannot be withdrawn beyond what has accrued.
+     */
+    function test_WithdrawFees_BoundedByAccrued() public {
+        token.mint(address(queue), 100 * USDC);
+        owner.pay(queue, 1, alice, 10 * USDC, 300);
+
+        vm.expectRevert(abi.encodeWithSelector(IPaymentQueue.InsufficientFees.selector, 3 * USDC / 10));
+        owner.withdrawFees(queue, bob, 3 * USDC / 10 + 1);
+    }
+
+    /**
+     * @notice Only the owner can withdraw fees.
+     */
+    function test_WithdrawFees_OwnerOnly() public {
+        token.mint(address(queue), 100 * USDC);
+        owner.pay(queue, 1, alice, 10 * USDC, 300);
+
+        vm.expectRevert(IPrototype.Unauthorized.selector);
+        stranger.withdrawFees(queue, address(stranger), 3 * USDC / 10);
     }
 
     /**

@@ -8,7 +8,7 @@ import {PaymentQueueHandler} from "./PaymentQueueHandler.sol";
 
 /**
  * @notice What holds for {PaymentQueue} after any sequence of payments, repeats, funding, sweeps,
- * withdrawals and refused transfers.
+ * withdrawals of funds and of fees, and refused transfers.
  */
 contract PaymentQueueInvariantTest is BaseTest {
     BlacklistToken internal token;
@@ -32,15 +32,15 @@ contract PaymentQueueInvariantTest is BaseTest {
     }
 
     /**
-     * @notice A paid id's recipient holds exactly the first amount submitted for it; any other id's
-     * recipient holds nothing.
+     * @notice A paid id's recipient holds exactly the first amount submitted for it, less the fee fixed
+     * with it; any other id's recipient holds nothing.
      */
     function invariant_EachIdPaidAtMostOnce() public view {
         for (uint256 i = 0; i < handler.submittedCount(); i++) {
             uint256 id = handler.submitted(i);
             uint256 held = token.balanceOf(handler.recipientOf(id));
             if (queue.statusOf(id) == IPaymentQueue.Status.Paid) {
-                assertEq(held, handler.amountOf(id), "paid id: first amount, once");
+                assertEq(held, handler.amountOf(id) - handler.feeOf(id), "paid id: first amount less its fee, once");
             } else {
                 assertEq(held, 0, "unpaid id: nothing");
             }
@@ -57,7 +57,7 @@ contract PaymentQueueInvariantTest is BaseTest {
     }
 
     /**
-     * @notice Every token funded is in the float, with a paid recipient, or withdrawn.
+     * @notice Every token funded is in the queue, with a paid recipient, or withdrawn as funds or fees.
      */
     function invariant_TokensConserved() public view {
         uint256 paid;
@@ -66,6 +66,20 @@ contract PaymentQueueInvariantTest is BaseTest {
         }
         uint256 held = token.balanceOf(address(queue));
         assertEq(handler.funded(), held + paid + token.balanceOf(handler.sink()), "tokens unaccounted for");
+    }
+
+    /**
+     * @notice The accrued fees are exactly the fees of the paid ids less what the owner has withdrawn, and
+     * what the queue holds is the funds plus those fees. A refused payment earns nothing.
+     */
+    function invariant_FeesAccrueOnlyOnPayment() public view {
+        uint256 earned;
+        for (uint256 i = 0; i < handler.submittedCount(); i++) {
+            uint256 id = handler.submitted(i);
+            if (queue.statusOf(id) == IPaymentQueue.Status.Paid) earned += handler.feeOf(id);
+        }
+        assertEq(queue.fees(), earned - handler.collected(), "fees() disagrees with the paid ids");
+        assertEq(token.balanceOf(address(queue)), queue.funds() + queue.fees(), "held != funds + fees");
     }
 
     /**
@@ -109,7 +123,7 @@ contract PaymentQueueInvariantTest is BaseTest {
     }
 
     /**
-     * @notice A sweep only stops short of its limit when the float cannot cover the next payment.
+     * @notice A sweep only stops short of its limit when the funds cannot cover the next payment.
      */
     function invariant_SweepsStopOnlyForFloat() public view {
         assertFalse(handler.stalled(), "a sweep stopped while it could pay");

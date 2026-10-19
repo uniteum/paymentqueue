@@ -49,7 +49,7 @@ contract PaymentQueueUpstreamTest is BaseTest {
 
     /**
      * @notice "should skip payments with insufficient funds". **Reversed in v2.** v1 dropped the
-     * unaffordable payment and paid the one behind it. v2 keeps the line: both wait until the float
+     * unaffordable payment and paid the one behind it. v2 keeps the line: both wait until the funds
      * covers the first, so neither is lost and neither is paid out of order.
      */
     function test_Upstream_HoldsTheLineWithInsufficientFunds() public {
@@ -57,7 +57,7 @@ contract PaymentQueueUpstreamTest is BaseTest {
         owner.pay(queue, 2, bob, 100 * USDC);
         stranger.processPayments(queue, 2);
 
-        assertEq(token.balanceOf(alice), 0, "alice waits for float");
+        assertEq(token.balanceOf(alice), 0, "alice waits for funds");
         assertEq(token.balanceOf(bob), 0, "bob waits behind alice, not skipped ahead");
         assertStatus(queue, 1, IPaymentQueue.Status.Queued, "1 kept, not dropped");
         assertStatus(queue, 2, IPaymentQueue.Status.Queued, "2 kept");

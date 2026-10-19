@@ -13,7 +13,8 @@ import {SafeERC20} from "erc20/SafeERC20.sol";
  * @title PaymentQueue
  * @notice Idempotent ERC-20 payout queues, made by anyone for themselves. The owner submits each
  * payment under an id of its own choosing, so submitting the same payment again, after a lost
- * response or a retry, never pays twice.
+ * response or a retry, never pays twice. Each payment names a fee, which the queue keeps for the
+ * owner when it pays.
  * @dev A Bitsy prototype (https://uniteum.one/bitsy/): the deployed contract is an inert factory with
  * no owner, and each queue is an EIP-1167 clone of it at a CREATE2 address derived from its owner and
  * token, so {made} can name a queue before it exists. The token may be given as an {IAddressLookup},
@@ -24,15 +25,22 @@ import {SafeERC20} from "erc20/SafeERC20.sol";
  * passes it, so nothing is rescanned. Status is written before each transfer, and both entry points
  * are `nonReentrant`: a token with transfer hooks would otherwise let a recipient re-enter a sweep
  * partway through its own payment.
+ *
+ * Kept fees are counted in {fees} and left in the token balance, so the funds are what the queue holds
+ * less that count. Paying draws a payment's whole amount from the funds: the recipient's share leaves
+ * and the fee's share moves from funds to fees.
  * @author Paul Reinholdtsen (reinholdtsen.eth)
  */
 contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
     using SafeERC20 for IERC20;
 
+    uint256 private constant BASIS_POINTS = 10_000;
+
     struct Entry {
         uint256 id;
         address recipient;
         uint256 amount;
+        uint256 fee;
     }
 
     /**
@@ -52,6 +60,11 @@ contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
      * @inheritdoc IPaymentQueue
      */
     IERC20 public token;
+
+    /**
+     * @inheritdoc IPaymentQueue
+     */
+    uint256 public fees;
 
     mapping(uint256 id => Record) private _records;
     mapping(uint256 index => Entry) private _queue;
@@ -81,18 +94,34 @@ contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
 
     /**
      * @inheritdoc IPaymentQueue
+     * @dev Saturates rather than reverting should the balance ever fall below the fee count, which no
+     * well-behaved token lets happen: a queue that cannot compute its funds cannot pay or sweep.
      */
-    function pay(uint256 id, address recipient, uint256 amount) external nonReentrant returns (Status status) {
+    function funds() public view returns (uint256) {
+        uint256 held = token.balanceOf(address(this));
+        return held > fees ? held - fees : 0;
+    }
+
+    /**
+     * @inheritdoc IPaymentQueue
+     */
+    function pay(uint256 id, address recipient, uint256 amount, uint256 feeBasisPoints)
+        external
+        nonReentrant
+        returns (Status status)
+    {
         if (msg.sender != owner) revert Unauthorized();
         status = _records[id].status;
         if (status != Status.Unknown) return status;
-        if (_head == _tail && amount <= token.balanceOf(address(this))) {
-            status = _settle(id, recipient, amount);
+        if (feeBasisPoints > BASIS_POINTS) revert FeeTooHigh(feeBasisPoints);
+        uint256 fee = amount * feeBasisPoints / BASIS_POINTS;
+        if (_head == _tail && amount <= funds()) {
+            status = _settle(id, recipient, amount, fee);
         } else {
             status = Status.Queued;
             _record(id, status);
-            _queue[_tail++] = Entry({id: id, recipient: recipient, amount: amount});
-            emit PaymentQueued(id, recipient, amount);
+            _queue[_tail++] = Entry({id: id, recipient: recipient, amount: amount, fee: fee});
+            emit PaymentQueued(id, recipient, amount, fee);
         }
     }
 
@@ -100,24 +129,36 @@ contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
      * @inheritdoc IPaymentQueue
      */
     function processPayments(uint256 limit) external nonReentrant returns (uint256 settled) {
-        uint256 balance = token.balanceOf(address(this));
+        uint256 available = funds();
         uint256 head = _head;
         uint256 tail = _tail;
         while (settled < limit && head < tail) {
             Entry memory entry = _queue[head];
-            if (entry.amount > balance) break;
+            if (entry.amount > available) break;
             delete _queue[head];
             _head = ++head;
             ++settled;
-            if (_settle(entry.id, entry.recipient, entry.amount) == Status.Paid) balance -= entry.amount;
+            if (_settle(entry.id, entry.recipient, entry.amount, entry.fee) == Status.Paid) available -= entry.amount;
         }
     }
 
     /**
      * @inheritdoc IPaymentQueue
      */
-    function withdraw(address to, uint256 amount) external {
+    function withdrawFunds(address to, uint256 amount) external {
         if (msg.sender != owner) revert Unauthorized();
+        uint256 available = funds();
+        if (amount > available) revert InsufficientFunds(available);
+        token.safeTransfer(to, amount);
+    }
+
+    /**
+     * @inheritdoc IPaymentQueue
+     */
+    function withdrawFees(address to, uint256 amount) external {
+        if (msg.sender != owner) revert Unauthorized();
+        if (amount > fees) revert InsufficientFees(fees);
+        fees -= amount;
         token.safeTransfer(to, amount);
     }
 
@@ -176,9 +217,9 @@ contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
     }
 
     /**
-     * @dev Transfer, and record whether it happened. `trySafeTransfer` turns a refusal, by revert or
-     * by a false return, into `Failed` instead of a revert, so one refused recipient cannot block the
-     * line.
+     * @dev Transfer the amount less the fee, and record whether it happened; the fee accrues only when
+     * it did. `trySafeTransfer` turns a refusal, by revert or by a false return, into `Failed` instead
+     * of a revert, so one refused recipient cannot block the line.
      *
      * It cannot tell a refusal from running out of gas. EIP-150 keeps back 1/64 of this frame's gas
      * from the transfer, and for a costly enough token that remainder is enough to finish the call
@@ -186,16 +227,17 @@ contract PaymentQueue is IPaymentQueue, ReentrancyGuardTransient, Prototype {
      * `Failed`. A failed transfer that leaves less than that remainder is taken as out of gas, and
      * reverts.
      */
-    function _settle(uint256 id, address recipient, uint256 amount) private returns (Status) {
+    function _settle(uint256 id, address recipient, uint256 amount, uint256 fee) private returns (Status) {
         _record(id, Status.Paid);
         uint256 gasBefore = gasleft();
-        if (token.trySafeTransfer(recipient, amount)) {
-            emit PaymentPaid(id, recipient, amount);
+        if (token.trySafeTransfer(recipient, amount - fee)) {
+            fees += fee;
+            emit PaymentPaid(id, recipient, amount, fee);
             return Status.Paid;
         }
         if (gasleft() < gasBefore / 64) revert TransferOutOfGas(id);
         _record(id, Status.Failed);
-        emit PaymentFailed(id, recipient, amount);
+        emit PaymentFailed(id, recipient, amount, fee);
         return Status.Failed;
     }
 
